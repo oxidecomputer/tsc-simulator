@@ -34,6 +34,12 @@ fn fixed_point_overflow(val: u128, int_size: u8, frac_size: u8) -> bool {
     (val & mask) != 0
 }
 
+fn overflow_64(val: u128) -> bool {
+    let mask = !(u128::MAX >> 64);
+
+    (val & mask) != 0
+}
+
 /// Given as input guest and host frequencies in KHz, outputs a fixed point
 /// number representing the ratio of guest/host, with the binary point at the
 /// last `frac_size` bits.
@@ -147,12 +153,18 @@ pub fn guest_tsc(
 
     let int_size = fixed_point_int_size_64(frac_size, int_opt);
 
-    let host_tsc_scaled: u128 = cur_host_tsc as u128 * freq_multiplier as u128;
-    if fixed_point_overflow(host_tsc_scaled, int_size, frac_size) {
-        return Err(anyhow!("cannot scale host TSC"));
+    let host_tsc_scaled: u128 = (cur_host_tsc as u128 * freq_multiplier as u128) >> frac_size;
+    if overflow_64(host_tsc_scaled) {
+        return Err(anyhow!(
+            "cannot scale host TSC: host_tsc_scaled={}, freq_multiplier={}, {}.{} format",
+            host_tsc_scaled,
+            freq_multiplier,
+            int_size,
+            frac_size
+        ));
     }
 
-    let guest_tsc: i128 = ((host_tsc_scaled >> frac_size) as i128) + tsc_offset as i128;
+    let guest_tsc: i128 = host_tsc_scaled as i128 + tsc_offset as i128;
     let mask = !(u128::MAX >> 64);
     if (mask & guest_tsc as u128) != 0 {
         return Err(anyhow!(
