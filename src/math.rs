@@ -10,11 +10,11 @@ pub const NS_PER_SEC: u32 = 1000000000;
 
 pub const HZ_PER_KHZ: u64 = 1000;
 
-fn fixed_pt_format_64(frac_size: u8, int_size: Option<u8>) -> (u8, u8) {
+fn fixed_point_int_size_64(frac_size: u8, int_opt: Option<u8>) -> u8 {
     assert!(frac_size > 0);
     assert!(frac_size < 64);
 
-    let int_size = if let Some(i) = int_size {
+    let int_size = if let Some(i) = int_opt {
         i
     } else {
         64 - frac_size
@@ -24,38 +24,42 @@ fn fixed_pt_format_64(frac_size: u8, int_size: Option<u8>) -> (u8, u8) {
         "int_size + frac_size must be <= 64"
     );
 
-    (int_size, frac_size)
+    int_size
 }
 
-fn overflow(val: u128, int_size: u8, frac_size: u8) -> bool {
+fn fixed_point_overflow(val: u128, int_size: u8, frac_size: u8) -> bool {
     let n_unused_bits = 64 + (64 - int_size - frac_size);
     let mask = !(u128::MAX >> n_unused_bits);
 
     (val & mask) != 0
 }
 
-/// Given as input guest and host frequencies in KHz, outputs a fixed point number
-/// representing the ratio of guest/host, with the binary point at the last
-/// `frac_size` bits.
+/// Given as input guest and host frequencies in KHz, outputs a fixed point
+/// number representing the ratio of guest/host, with the binary point at the
+/// last `frac_size` bits.
 ///
 /// Max frequency KHz value if represented as a u32: 4294.96725 GHz   
 pub fn freq_multiplier(
     guest_khz: u32,
     host_khz: u32,
     frac_size: u8,
-    int_size: Option<u8>,
+    int_opt: Option<u8>,
 ) -> Result<u64> {
     assert_ne!(guest_khz, 0);
     assert_ne!(host_khz, 0);
 
-    let (int_size, frac_size) = fixed_pt_format_64(frac_size, int_size);
+    let int_size = fixed_point_int_size_64(frac_size, int_opt);
 
     let scaling_factor: u64 = 1 << frac_size;
     let multiplier = (scaling_factor as u128 * guest_khz as u128) / host_khz as u128;
 
-    if overflow(multiplier, int_size, frac_size) {
+    if fixed_point_overflow(multiplier, int_size, frac_size) {
         return Err(anyhow!(
-            "frequency ratio too large: guest_khz={guest_khz}, host_khz={host_khz}, {int_size}.{frac_size} format"
+            "frequency ratio too large: guest_khz={}, host_khz={}, {}.{} format",
+            guest_khz,
+            host_khz,
+            int_size,
+            frac_size
         ));
     }
 
@@ -76,21 +80,19 @@ fn calc_tsc_offset(
     initial_guest_tsc: u64,
     multiplier: u64,
     frac_size: u8,
-    int_size: Option<u8>,
+    int_opt: Option<u8>,
 ) -> Result<i64> {
-    let (int_size, frac_size) = fixed_pt_format_64(frac_size, int_size);
+    let int_size = fixed_point_int_size_64(frac_size, int_opt);
     let host_tsc_scaled: u128 = (initial_host_tsc as u128 * multiplier as u128) >> frac_size;
 
-    if overflow(host_tsc_scaled, int_size, frac_size) {
+    if fixed_point_overflow(host_tsc_scaled, int_size, frac_size) {
         return Err(anyhow!(
-            "cannot scale host TSC: host_tsc={initial_host_tsc}, {int_size}.{frac_size} format"
+            "cannot scale host TSC: host_tsc={}, {}.{} format",
+            initial_host_tsc,
+            int_size,
+            frac_size
         ));
     }
-
-    /*eprintln!(
-    "host_tsc_scaled={}, initial_guest_tsc={}",
-    host_tsc_scaled, initial_guest_tsc
-    );*/
 
     let (diff, negate) = if host_tsc_scaled as u64 >= initial_guest_tsc {
         ((host_tsc_scaled as u64 - initial_guest_tsc), true)
@@ -113,15 +115,15 @@ pub fn tsc_offset(
     guest_khz: u32,
     host_khz: u32,
     frac_size: u8,
-    int_size: Option<u8>,
+    int_opt: Option<u8>,
 ) -> Result<i64> {
-    let multiplier = freq_multiplier(guest_khz, host_khz, frac_size, int_size)?;
+    let multiplier = freq_multiplier(guest_khz, host_khz, frac_size, int_opt)?;
     calc_tsc_offset(
         initial_host_tsc,
         initial_guest_tsc,
         multiplier,
         frac_size,
-        int_size,
+        int_opt,
     )
 }
 
@@ -132,22 +134,35 @@ pub fn guest_tsc(
     guest_khz: u32,
     cur_host_tsc: u64,
     frac_size: u8,
-    int_size: Option<u8>,
+    int_opt: Option<u8>,
 ) -> Result<u64> {
-    let freq_multiplier = freq_multiplier(guest_khz, host_khz, frac_size, int_size)?;
+    let freq_multiplier = freq_multiplier(guest_khz, host_khz, frac_size, int_opt)?;
     let tsc_offset = calc_tsc_offset(
         initial_host_tsc,
         initial_guest_tsc,
         freq_multiplier,
         frac_size,
-        int_size,
+        int_opt,
     )?;
 
-    let host_tsc_scaled: u128 = cur_host_tsc as u128 * freq_multiplier as u128;
-    let res = ((host_tsc_scaled >> frac_size) as i64) + tsc_offset;
-    // TODO: handle edge cases
+    let int_size = fixed_point_int_size_64(frac_size, int_opt);
 
-    Ok(res as u64)
+    let host_tsc_scaled: u128 = cur_host_tsc as u128 * freq_multiplier as u128;
+    if fixed_point_overflow(host_tsc_scaled, int_size, frac_size) {
+        return Err(anyhow!("cannot scale host TSC"));
+    }
+
+    let guest_tsc: i128 = ((host_tsc_scaled >> frac_size) as i128) + tsc_offset as i128;
+    let mask = !(u128::MAX >> 64);
+    if (mask & guest_tsc as u128) != 0 {
+        return Err(anyhow!(
+            "offset addition will overflow: host_tsc_scaled={}, tsc_offset={}",
+            host_tsc_scaled,
+            tsc_offset
+        ));
+    }
+
+    Ok(guest_tsc as u64)
 }
 
 pub fn tsc_incr(tsc: u64, freq_khz: u32) -> u64 {
@@ -174,9 +189,11 @@ mod tests {
     use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
 
-    // Ensure we can't panic freq_multiplier
+    // Ensure that freq_multiplier() doesn't panic, assuming:
+    // - guest/host frequencies are > 0
+    // - int_size/frac_size are nonzero and fit into 64 bits
     #[quickcheck]
-    fn freq_ratio_check(gf: u32, hf: u32, frac: u8, int: Option<u8>) -> TestResult {
+    fn freq_ratio_panic_check(gf: u32, hf: u32, frac: u8, int: Option<u8>) -> TestResult {
         if gf == 0 || hf == 0 || frac == 0 || frac >= 64 {
             return TestResult::discard();
         }
@@ -185,6 +202,7 @@ mod tests {
             Some(_) | None => {
                 let _ = freq_multiplier(gf, hf, frac, int);
 
+                // if we got here, the function didn't panic, so it passes
                 TestResult::from_bool(true)
             }
         }
@@ -194,7 +212,7 @@ mod tests {
     // - guest/host frequencies are > 0
     // - int_size/frac_size are nonzero and fit into 64 bits
     #[quickcheck]
-    fn tsc_offset_check(
+    fn tsc_offset_panic_check(
         ihtsc: u64,
         igtsc: u64,
         gf: u32,
@@ -209,7 +227,42 @@ mod tests {
         match int {
             Some(i) if i == 0 || i >= 64 || (i + frac) > 64 => TestResult::discard(),
             Some(_) | None => {
-                tsc_offset(ihtsc, igtsc, gf, hf, frac, None);
+                let _ = tsc_offset(ihtsc, igtsc, gf, hf, frac, None);
+
+                // if we got here, the function didn't panic, so it passes
+                TestResult::from_bool(true)
+            }
+        }
+    }
+
+    // Check that guest_tsc() doesn't panic, assuming:
+    // - guest/host frequencies are > 0
+    // - int_size/frac_size are nonzero and fit into 64 bits
+    // - current host TSC >= initial host TSC
+    #[quickcheck]
+    fn guest_tsc_panic_check(
+        ihtsc: u64,
+        igtsc: u64,
+        gf: u32,
+        hf: u32,
+        chtsc: u64,
+        frac: u8,
+        int: Option<u8>,
+    ) -> TestResult {
+        if gf == 0 || hf == 0 || frac == 0 || frac >= 64 {
+            return TestResult::discard();
+        }
+
+        if chtsc < ihtsc {
+            return TestResult::discard();
+        }
+
+        match int {
+            Some(i) if i == 0 || i >= 64 || (i + frac) > 64 => TestResult::discard(),
+            Some(_) | None => {
+                let _ = guest_tsc(ihtsc, igtsc, gf, hf, chtsc, frac, None);
+
+                // if we got here, the function didn't panic, so it passes
                 TestResult::from_bool(true)
             }
         }
