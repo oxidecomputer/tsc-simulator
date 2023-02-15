@@ -226,8 +226,8 @@ mod tests {
 
         match int {
             Some(i) if i == 0 || i >= 64 || (i + frac) > 64 => TestResult::discard(),
-            Some(_) | None => {
-                let _ = tsc_offset(ihtsc, igtsc, gf, hf, frac, None);
+            v => {
+                let _ = tsc_offset(ihtsc, igtsc, gf, hf, frac, v);
 
                 // if we got here, the function didn't panic, so it passes
                 TestResult::from_bool(true)
@@ -259,8 +259,8 @@ mod tests {
 
         match int {
             Some(i) if i == 0 || i >= 64 || (i + frac) > 64 => TestResult::discard(),
-            Some(_) | None => {
-                let _ = guest_tsc(ihtsc, igtsc, gf, hf, chtsc, frac, None);
+            v => {
+                let _ = guest_tsc(ihtsc, igtsc, gf, hf, chtsc, frac, v);
 
                 // if we got here, the function didn't panic, so it passes
                 TestResult::from_bool(true)
