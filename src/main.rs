@@ -50,7 +50,7 @@ enum Command {
         #[clap(long = "migrate")]
         hosts: Vec<String>,
 
-        /// Archicture of hosts
+        /// Architecture of hosts
         #[clap(long, arg_enum, default_value = "amd")]
         arch: Arch,
 

@@ -10,6 +10,9 @@ pub const NS_PER_SEC: u32 = 1000000000;
 
 pub const HZ_PER_KHZ: u64 = 1000;
 
+pub const MIN_RATIO: u8 = 1;
+pub const MAX_RATIO: u8 = 15;
+
 fn fixed_point_int_size_64(frac_size: u8, int_opt: Option<u8>) -> u8 {
     assert!(frac_size > 0);
     assert!(frac_size < 64);
@@ -27,6 +30,7 @@ fn fixed_point_int_size_64(frac_size: u8, int_opt: Option<u8>) -> u8 {
     int_size
 }
 
+// Returns true if `val` will overflow `int_size + frac_size` bits
 fn fixed_point_overflow(val: u128, int_size: u8, frac_size: u8) -> bool {
     let n_unused_bits = 64 + (64 - int_size - frac_size);
     let mask = !(u128::MAX >> n_unused_bits);
@@ -34,6 +38,7 @@ fn fixed_point_overflow(val: u128, int_size: u8, frac_size: u8) -> bool {
     (val & mask) != 0
 }
 
+// Returns true if `val` will overflow 6 bits
 fn overflow_64(val: u128) -> bool {
     let mask = !(u128::MAX >> 64);
 
@@ -73,7 +78,7 @@ pub fn freq_multiplier(
 }
 
 // Helper function to keep from calculating the multiplier twice
-// (That is, assumes that `multiplier` was created by `freq_multiplier`)
+// (That is, `multiplier` is assumed to be created by `freq_multiplier`)
 //
 // `multiplier` is a fixed point number, with `frac_size` fractional bits,
 // representing the ratio of guest frequency to host frequency.
@@ -91,10 +96,12 @@ fn calc_tsc_offset(
     let int_size = fixed_point_int_size_64(frac_size, int_opt);
     let host_tsc_scaled: u128 = (initial_host_tsc as u128 * multiplier as u128) >> frac_size;
 
-    if fixed_point_overflow(host_tsc_scaled, int_size, frac_size) {
+    if overflow_64(host_tsc_scaled) {
         return Err(anyhow!(
-            "cannot scale host TSC: host_tsc={}, {}.{} format",
+            "cannot scale host TSC: host_tsc={}, multiplier={} ({:#x}), {}.{} format",
             initial_host_tsc,
+            multiplier,
+            multiplier,
             int_size,
             frac_size
         ));
@@ -106,8 +113,12 @@ fn calc_tsc_offset(
         ((initial_guest_tsc - host_tsc_scaled as u64), false)
     };
 
-    if diff == u64::MAX {
-        return Err(anyhow!("cannot represent TSC offset"));
+    if (diff & 1u64 << 63) != 0 {
+        return Err(anyhow!("negation of host_tsc_scaled={} and initial_guest_tsc={} will overflow (diff={}, negate={})",
+            host_tsc_scaled,
+            initial_guest_tsc,
+            diff,
+            negate));
     }
 
     let res = if negate { -(diff as i64) } else { diff as i64 };
@@ -115,6 +126,15 @@ fn calc_tsc_offset(
     Ok(res)
 }
 
+/// Compute the TSC offset for a guest, with inputs:
+/// - `initial_host_tsc`: TSC of the host when the guest started running
+/// on this host (either at boot, or following a migration)
+/// - `initial_guest_tsc`: TSC of guest when it started running on this host (0
+/// for boot)
+/// - frequencies of the guest and host (KHz)
+/// - specification of the fixed point number format to do ratio calclations
+/// with
+///
 pub fn tsc_offset(
     initial_host_tsc: u64,
     initial_guest_tsc: u64,
@@ -133,6 +153,17 @@ pub fn tsc_offset(
     )
 }
 
+/// Compute the guest TSC at a point in time for a guest, with inputs:
+/// - `initial_host_tsc`: TSC of the host when the guest started running
+/// on this host (either at boot, or following a migration)
+/// - `initial_guest_tsc`: TSC of guest when it started running on this host (0
+/// for boot)
+/// - frequencies of the guest and host (KHz)
+/// - `cur_host_tsc`: the current TSC value of the host (this is what anchors
+/// this value to a point in "time")
+/// - specification of the fixed point number format to do ratio calclations
+/// with
+///
 pub fn guest_tsc(
     initial_host_tsc: u64,
     initial_guest_tsc: u64,
@@ -177,11 +208,13 @@ pub fn guest_tsc(
     Ok(guest_tsc as u64)
 }
 
+// Outputs the TSC value one second in the future, for a given frequency
 pub fn tsc_incr(tsc: u64, freq_khz: u32) -> u64 {
     let freq_hz = freq_khz as u64 * HZ_PER_KHZ;
     tsc + freq_hz
 }
 
+// For an input TSC and frequency, translate to hrtime
 pub fn hrtime(tsc: u64, freq_hz: u64) -> Result<u64> {
     let product: u128 = tsc as u128 * NS_PER_SEC as u128;
 
@@ -189,6 +222,7 @@ pub fn hrtime(tsc: u64, freq_hz: u64) -> Result<u64> {
     Ok(product as u64 / freq_hz)
 }
 
+// For an input hrtime and frequency, translate to a TSC value
 pub fn tsc(hrtime: u64, freq_hz: u64) -> Result<u64> {
     let product: u128 = hrtime as u128 * freq_hz as u128;
 
@@ -205,19 +239,22 @@ mod tests {
     // - guest/host frequencies are > 0
     // - int_size/frac_size are nonzero and fit into 64 bits
     #[quickcheck]
-    fn freq_ratio_panic_check(gf: u32, hf: u32, frac: u8, int: Option<u8>) -> TestResult {
-        if gf == 0 || hf == 0 || frac == 0 || frac >= 64 {
+    fn freq_multiplier_panic_check(gf: u32, hf: u32, frac: u8, int: u8) -> TestResult {
+        if gf == 0
+            || hf == 0
+            || frac == 0
+            || frac >= 64
+            || int == 0
+            || int >= 64
+            || (int + frac) >= 64
+        {
             return TestResult::discard();
         }
-        match int {
-            Some(i) if i == 0 || i >= 64 || (i + frac) > 64 => TestResult::discard(),
-            Some(_) | None => {
-                let _ = freq_multiplier(gf, hf, frac, int);
 
-                // if we got here, the function didn't panic, so it passes
-                TestResult::from_bool(true)
-            }
-        }
+        let _ = freq_multiplier(gf, hf, frac, Some(int));
+
+        // if we got here, the function didn't panic, so it passes
+        TestResult::from_bool(true)
     }
 
     // Check that tsc_offset() doesn't panic, assuming:
@@ -230,20 +267,70 @@ mod tests {
         gf: u32,
         hf: u32,
         frac: u8,
-        int: Option<u8>,
+        int: u8,
     ) -> TestResult {
-        if gf == 0 || hf == 0 || frac == 0 || frac >= 64 {
+        if gf == 0
+            || hf == 0
+            || frac == 0
+            || frac >= 64
+            || int == 0
+            || int >= 64
+            || (int + frac) >= 64
+        {
             return TestResult::discard();
         }
 
-        match int {
-            Some(i) if i == 0 || i >= 64 || (i + frac) > 64 => TestResult::discard(),
-            v => {
-                let _ = tsc_offset(ihtsc, igtsc, gf, hf, frac, v);
+        let _ = tsc_offset(ihtsc, igtsc, gf, hf, frac, Some(int));
 
-                // if we got here, the function didn't panic, so it passes
-                TestResult::from_bool(true)
-            }
+        // if we got here, the function didn't panic, so it passes
+        TestResult::from_bool(true)
+    }
+
+    // Ensure that we can represent a reasonable range of ratios
+    #[quickcheck]
+    fn calc_tsc_offset_max_ratio(
+        ihtsc: u64,
+        igtsc: u64,
+        int: u8,
+        frac: u8,
+        ratio: u8,
+    ) -> TestResult {
+        if !((int == INT_SIZE_AMD && frac == FRAC_SIZE_AMD)
+            || (int == INT_SIZE_INTEL && frac == FRAC_SIZE_AMD))
+        {
+            return TestResult::discard();
+        }
+
+        if ratio < MIN_RATIO || ratio > MAX_RATIO {
+            return TestResult::discard();
+        }
+
+        // Convert ratio to a multiplier
+        let m = (ratio as u64) << frac;
+
+        let offset = calc_tsc_offset(ihtsc, igtsc, m, frac, Some(int));
+
+        // Catch if the TSC will overflow
+        //
+        // This check only catches values that *could* overflow, but doesn't
+        // guarantee that it would. So there are some valid inputs here that
+        // fail this check, but won't produce an error in the calculation.
+        //
+        // For example, if we have values:
+        // - initial_host_tsc: 1 << 62
+        // - ratio: 1
+        // - guest_TSC: 0
+        //
+        // initial_host_tsc * multiplier  will always be less than 64 bits,
+        // since the ratio is 1. and it won't overflow. But if the ratio were
+        // 2, calculating the offset would cause an error.
+        //
+        let htsc_bits = 64 - ihtsc.leading_zeros();
+        let gtsc_bits = 64 - igtsc.leading_zeros();
+        if htsc_bits > 60 || gtsc_bits > 60 {
+            TestResult::discard()
+        } else {
+            TestResult::from_bool(offset.is_ok())
         }
     }
 
@@ -278,6 +365,148 @@ mod tests {
                 TestResult::from_bool(true)
             }
         }
+    }
+
+    // Test that a guest sees the same TSC on two different hosts, for the same point in time
+    // (analagous to a migration)
+    #[quickcheck]
+    fn guest_tsc_same_across_migration(
+        // boot host (initial guest TSC: 0)
+        boot_htsc: u64,
+        cur_htsc: u64,
+        boot_hfreq: u32,
+        guest_freq: u32,
+
+        // migration host
+        migrate_htsc: u64,
+        migrate_hfreq: u32,
+
+        frac: u8,
+        int: u8,
+    ) -> TestResult {
+        if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64 {
+            return TestResult::discard();
+        }
+
+        if boot_hfreq == 0 || guest_freq == 0 || migrate_hfreq == 0 {
+            return TestResult::discard();
+        }
+
+        if cur_htsc < boot_htsc {
+            return TestResult::discard();
+        }
+
+        // Guest TSC on source host at migration time
+        let src_tsc = guest_tsc(
+            boot_htsc,
+            0,
+            boot_hfreq,
+            guest_freq,
+            cur_htsc,
+            frac,
+            Some(int),
+        );
+
+        if src_tsc.is_err() {
+            return TestResult::from_bool(true);
+        }
+
+        // Guest TSC on dest host at migration time
+        let gtsc = src_tsc.unwrap();
+        let dst_tsc = guest_tsc(
+            migrate_htsc,
+            gtsc,
+            migrate_hfreq,
+            guest_freq,
+            migrate_htsc,
+            frac,
+            Some(int),
+        );
+
+        if dst_tsc.is_err() {
+            return TestResult::from_bool(true);
+        }
+
+        TestResult::from_bool(gtsc == dst_tsc.unwrap())
+    }
+
+    // Test that a guest doesn't lose precision one second into the future
+    // following a migration
+    // TODO: any ratio not an even power of 2 is going to lose some precision
+    #[quickcheck]
+    fn guest_tsc_drift(
+        // boot host (initial guest TSC: 0)
+        boot_htsc: u64,
+        cur_htsc: u64,
+        boot_hfreq: u32,
+        guest_freq: u32,
+
+        // migration host
+        migrate_htsc: u64,
+        migrate_hfreq: u32,
+
+        frac: u8,
+        int: u8,
+    ) -> TestResult {
+        if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64 {
+            return TestResult::discard();
+        }
+
+        if boot_hfreq == 0 || guest_freq == 0 || migrate_hfreq == 0 {
+            return TestResult::discard();
+        }
+
+        if cur_htsc < boot_htsc {
+            return TestResult::discard();
+        }
+
+        // Guest TSC on source host at migration time
+        let src_tsc = guest_tsc(
+            boot_htsc,
+            0,
+            boot_hfreq,
+            guest_freq,
+            cur_htsc,
+            frac,
+            Some(int),
+        );
+        if src_tsc.is_err() {
+            return TestResult::from_bool(true);
+        }
+
+        // Guest TSC on dest host at migration time
+        let gtsc = src_tsc.unwrap();
+        let dst_tsc = guest_tsc(
+            migrate_htsc,
+            gtsc,
+            migrate_hfreq,
+            guest_freq,
+            migrate_htsc,
+            frac,
+            Some(int),
+        );
+        if dst_tsc.is_err() {
+            return TestResult::from_bool(true);
+        }
+        let dst_tsc = dst_tsc.unwrap();
+
+        // Host and Guest TSCs, one second into the future
+        let htsc_future = tsc_incr(migrate_htsc, migrate_hfreq);
+        let gtsc_future = guest_tsc(
+            migrate_htsc,
+            dst_tsc,
+            migrate_hfreq,
+            guest_freq,
+            htsc_future,
+            frac,
+            Some(int),
+        );
+        if gtsc_future.is_err() {
+            return TestResult::from_bool(false);
+        }
+
+        // Should have incremented guest frequency in hz
+        TestResult::from_bool((gtsc_future.unwrap() - dst_tsc) == (guest_freq as u64 * 1000))
     }
 
     #[test]
