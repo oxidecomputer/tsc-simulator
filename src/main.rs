@@ -4,6 +4,7 @@ use crate::math::*;
 
 use anyhow::anyhow;
 use clap::{clap_derive::ArgEnum, Parser, Subcommand};
+use clap_num::maybe_hex;
 
 mod math;
 
@@ -73,22 +74,22 @@ enum CalcCommand {
     /// Given a TSC value and a frequency, compute hrtime (nanoseconds)
     Hrtime {
         /// TSC value
-        #[clap(short = 't')]
+        #[clap(short = 't', value_parser=maybe_hex::<u64>)]
         tsc: u64,
 
         /// Frequency (Hz)
-        #[clap(short = 'f', default_value = "1000000000")]
+        #[clap(short = 'f', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
         freq_hz: u64,
     },
 
     /// Given an hrtime and a frequency, compute TSC value
     Tsc {
         /// hrtime (nanoseconds)
-        #[clap(short = 't')]
+        #[clap(short = 't', value_parser=maybe_hex::<u64>)]
         hrtime: u64,
 
         /// Frequency (Hz)
-        #[clap(short = 'f', default_value = "1000000000")]
+        #[clap(short = 'f', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
         freq_hz: u64,
     },
 

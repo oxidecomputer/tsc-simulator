@@ -187,8 +187,10 @@ pub fn guest_tsc(
     let host_tsc_scaled: u128 = (cur_host_tsc as u128 * freq_multiplier as u128) >> frac_size;
     if overflow_64(host_tsc_scaled) {
         return Err(anyhow!(
-            "cannot scale host TSC: host_tsc_scaled={}, freq_multiplier={}, {}.{} format",
-            host_tsc_scaled,
+            "cannot scale host TSC: host_tsc={} ({:#x}), freq_multiplier={} ({:#x}), {}.{} format",
+            cur_host_tsc,
+            cur_host_tsc,
+            freq_multiplier,
             freq_multiplier,
             int_size,
             frac_size
@@ -216,18 +218,14 @@ pub fn tsc_incr(tsc: u64, freq_khz: u32) -> u64 {
 
 // For an input TSC and frequency, translate to hrtime
 pub fn hrtime(tsc: u64, freq_hz: u64) -> Result<u64> {
-    let product: u128 = tsc as u128 * NS_PER_SEC as u128;
-
-    // TODO: math edge cases
-    Ok(product as u64 / freq_hz)
+    // TODO: edge cases
+    Ok((tsc as u64 / freq_hz) * NS_PER_SEC as u64)
 }
 
 // For an input hrtime and frequency, translate to a TSC value
 pub fn tsc(hrtime: u64, freq_hz: u64) -> Result<u64> {
-    let product: u128 = hrtime as u128 * freq_hz as u128;
-
-    // TODO: math edge cases
-    Ok(product as u64 / NS_PER_SEC as u64)
+    // TODO: edge cases
+    Ok((hrtime / NS_PER_SEC as u64) * freq_hz)
 }
 
 mod tests {
