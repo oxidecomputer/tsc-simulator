@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.69"
 clap = { version = "3.2", features = ["derive"] }
+clap-num = "1.0.2"
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
