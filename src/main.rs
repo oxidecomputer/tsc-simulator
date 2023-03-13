@@ -100,7 +100,7 @@ enum CalcCommand {
         initial_host_tsc: u64,
 
         /// Initial Guest TSC value
-        #[clap(short = 'g', value_parser=maybe_hex::<u64>, default_value = "0")]
+        #[clap(short = 't', value_parser=maybe_hex::<u64>, default_value = "0")]
         initial_guest_tsc: u64,
 
         /// Current Host TSC value
@@ -111,7 +111,7 @@ enum CalcCommand {
         host_hz: u64,
 
         /// Guest Frequency (Hz)
-        #[clap(short = 'q', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(short = 'g', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
         guest_hz: u64,
 
         // AMD defaults
@@ -128,11 +128,11 @@ enum CalcCommand {
         initial_host_tsc: u64,
 
         /// Initial Guest TSC value
-        #[clap(short = 'g', value_parser=maybe_hex::<u64>, default_value = "0")]
+        #[clap(short = 't', value_parser=maybe_hex::<u64>, default_value = "0")]
         initial_guest_tsc: u64,
 
         /// Guest Frequency (Hz)
-        #[clap(short = 'q', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(short = 'g', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
         guest_hz: u64,
 
         /// Host Frequency (Hz)
