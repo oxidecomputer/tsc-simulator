@@ -9,5 +9,9 @@ edition = "2021"
 anyhow = "1.0.69"
 clap = { version = "3.2", features = ["derive"] }
 clap-num = "1.0.2"
+libc = { version = "0.2.140", default-features = false }
 quickcheck = "1.0.3"
 quickcheck_macros = "1.0.0"
+
+[build-dependencies]
+cc = "1.0"
