@@ -201,13 +201,12 @@ pub fn tsc(hrtime: u64, freq_hz: u64) -> Result<u64> {
     Ok((hrtime / NS_PER_SEC as u64) * freq_hz)
 }
 
-/*
 mod tests {
     const MIN_RATIO: u8 = 1;
     const MAX_RATIO: u8 = 15;
 
     use crate::math::*;
-    use crate::tests::freq_ratio_tests;
+    //use crate::tests::freq_ratio_tests;
     use quickcheck::TestResult;
     use quickcheck_macros::quickcheck;
 
@@ -215,7 +214,12 @@ mod tests {
     // - guest/host frequencies are > 0
     // - int_size/frac_size are nonzero and fit into 64 bits
     #[quickcheck]
-    fn freq_multiplier_panic_check(gf: u64, hf: u64, frac: u32, int: u32) -> TestResult {
+    fn freq_multiplier_panic_check(
+        gf: u64,
+        hf: u64,
+        frac: u32,
+        int: u32,
+    ) -> TestResult {
         if gf == 0
             || hf == 0
             || frac == 0
@@ -360,7 +364,8 @@ mod tests {
         frac: u32,
         int: u32,
     ) -> TestResult {
-        if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64 {
+        if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64
+        {
             return TestResult::discard();
         }
 
@@ -374,13 +379,7 @@ mod tests {
 
         // Guest TSC on source host at migration time
         let src_tsc = guest_tsc(
-            boot_htsc,
-            0,
-            boot_hfreq,
-            guest_freq,
-            cur_htsc,
-            frac,
-            int,
+            boot_htsc, 0, boot_hfreq, guest_freq, cur_htsc, frac, int,
         );
 
         if src_tsc.is_err() {
@@ -424,7 +423,8 @@ mod tests {
         frac: u32,
         int: u32,
     ) -> TestResult {
-        if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64 {
+        if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64
+        {
             return TestResult::discard();
         }
 
@@ -438,13 +438,7 @@ mod tests {
 
         // Guest TSC on source host at migration time
         let src_tsc = guest_tsc(
-            boot_htsc,
-            0,
-            boot_hfreq,
-            guest_freq,
-            cur_htsc,
-            frac,
-            int,
+            boot_htsc, 0, boot_hfreq, guest_freq, cur_htsc, frac, int,
         );
         if src_tsc.is_err() {
             return TestResult::from_bool(true);
@@ -482,134 +476,136 @@ mod tests {
         }
 
         // Should have incremented guest frequency in hz
-        TestResult::from_bool((gtsc_future.unwrap() - dst_tsc) == (guest_freq * 1000))
+        TestResult::from_bool(
+            (gtsc_future.unwrap() - dst_tsc) == (guest_freq * 1000),
+        )
     }
 
     /*
-    #[test]
-    fn test_freq_ratio() {
-        for args in freq_ratio_tests.iter() {
-            assert!(matches!(freq_multiplier(args.g, args.h, args.f, 64 - args.f), Ok(val)));
+        #[test]
+        fn test_freq_ratio() {
+            for args in freq_ratio_tests.iter() {
+                assert!(matches!(freq_multiplier(args.g, args.h, args.f, 64 - args.f), Ok(val)));
+            }
+
+            // 0.5 = 2^-1
+            assert!(matches!(freq_multiplier(1000, 2000, 2, 62), Ok(0b10)));
+            assert!(matches!(
+                freq_multiplier(1000, 2000, 8, 56),
+                Ok(0b10000000)
+            ));
+
+            // 1.5 = 2^0 + 2^-1
+            assert!(matches!(freq_multiplier(3000, 2000, 2, 62), Ok(0b110)));
+            assert!(matches!(
+                freq_multiplier(3000, 2000, 8, 56),
+                Ok(0b110000000)
+            ));
+
+            // 0.66 = 2^-1 + 2^-3 + 2^-5 + 2^-7
+            assert!(matches!(
+                freq_multiplier(2000, 3000, 8, 56),
+                Ok(0b10101010)
+            ));
+
+            // Intel: 16.48
+            let _n = 1u64 << FRAC_SIZE_INTEL;
+            assert!(matches!(
+                freq_multiplier(1000, 1000, FRAC_SIZE_INTEL, INT_SIZE_INTEL),
+                Ok(_n)
+            ));
+
+            // AMD: 8.32
+            let _n = 1u64 << 32;
+            assert!(matches!(
+                freq_multiplier(1000, 1000, FRAC_SIZE_AMD, INT_SIZE_AMD),
+                Ok(_n)
+            ));
+
+            // varied frequency sizes, ratio=1.0
+            let _n = 1u64 << 63;
+            assert!(matches!(
+                freq_multiplier(u64::MAX, u64::MAX, 63, 1),
+                Ok(_n)
+            ));
+            assert!(matches!(freq_multiplier(1000, 1000, 63, 1), Ok(_n)));
+            assert!(matches!(freq_multiplier(1, 1, 63, 1), Ok(_n)));
         }
 
-        // 0.5 = 2^-1
-        assert!(matches!(freq_multiplier(1000, 2000, 2, 62), Ok(0b10)));
-        assert!(matches!(
-            freq_multiplier(1000, 2000, 8, 56),
-            Ok(0b10000000)
-        ));
+        /*#[test]
+        fn test_freq_ratio_edge_cases() {
+            // Overflow conditions for frequency ratio calculation:
+            // - `scaling_factor * guest_freq` doesn't fit into 64 bits (>= 2^64)
+            // - `scaling_factor * guest_freq` doesn't fit into `int + frac` bits
 
-        // 1.5 = 2^0 + 2^-1
-        assert!(matches!(freq_multiplier(3000, 2000, 2, 62), Ok(0b110)));
-        assert!(matches!(
-            freq_multiplier(3000, 2000, 8, 56),
-            Ok(0b110000000)
-        ));
+            /*
+             * 1.63 format
+             * representable ratios:
+             * - int: [0, 1]
+             */
+            // ratio=0.5
+            let _n = (1u64 << 63) & (1u64 << 62);
+            assert!(matches!(freq_multiplier(500, 1000, 63, None), Ok(_n)));
 
-        // 0.66 = 2^-1 + 2^-3 + 2^-5 + 2^-7
-        assert!(matches!(
-            freq_multiplier(2000, 3000, 8, 56),
-            Ok(0b10101010)
-        ));
+            // ratio=0.75
+            let _n = (1u64 << 62) & (1u64 << 61);
+            assert!(matches!(freq_multiplier(750, 1000, 63, None), Ok(_n)));
 
-        // Intel: 16.48
-        let _n = 1u64 << FRAC_SIZE_INTEL;
-        assert!(matches!(
-            freq_multiplier(1000, 1000, FRAC_SIZE_INTEL, INT_SIZE_INTEL),
-            Ok(_n)
-        ));
+            // ratio=1.0
+            let _n = 1u64 << 63;
+            assert!(matches!(freq_multiplier(1000, 1000, 63, None), Ok(_n)));
 
-        // AMD: 8.32
-        let _n = 1u64 << 32;
-        assert!(matches!(
-            freq_multiplier(1000, 1000, FRAC_SIZE_AMD, INT_SIZE_AMD),
-            Ok(_n)
-        ));
+            // ratio=1.75
+            let _n = (1u64 << 63) & (1u64 << 62) & (1u64 << 61);
+            assert!(matches!(freq_multiplier(1750, 1000, 63, None), Ok(_n)));
 
-        // varied frequency sizes, ratio=1.0
-        let _n = 1u64 << 63;
-        assert!(matches!(
-            freq_multiplier(u64::MAX, u64::MAX, 63, 1),
-            Ok(_n)
-        ));
-        assert!(matches!(freq_multiplier(1000, 1000, 63, 1), Ok(_n)));
-        assert!(matches!(freq_multiplier(1, 1, 63, 1), Ok(_n)));
-    }
+            // OOB: ratio=2.0
+            assert!(matches!(freq_multiplier(2000, 1000, 63, None), Err(_)));
 
-    /*#[test]
-    fn test_freq_ratio_edge_cases() {
-        // Overflow conditions for frequency ratio calculation:
-        // - `scaling_factor * guest_freq` doesn't fit into 64 bits (>= 2^64)
-        // - `scaling_factor * guest_freq` doesn't fit into `int + frac` bits
+            /*
+             * 63.1 format
+             * representable ratios:
+             * - int: [0, 2^64 - 1]
+             * - frac: 1 digit of precision (0.5)
+             */
 
-        /*
-         * 1.63 format
-         * representable ratios:
-         * - int: [0, 1]
-         */
-        // ratio=0.5
-        let _n = (1u64 << 63) & (1u64 << 62);
-        assert!(matches!(freq_multiplier(500, 1000, 63, None), Ok(_n)));
+            // frac max precision: 0.5
+            // < 0.5 => 0.0
+            assert!(matches!(freq_multiplier(1, 1000, 1, None), Ok(0)));
+            assert!(matches!(freq_multiplier(499, 1000, 1, None), Ok(0)));
+            let _n = 2 ^ 63 & 0b1;
+            // = 0.5
+            assert!(matches!(freq_multiplier(500, 1000, 1, None), Ok(_n)));
+            // > 0.5 => 0.5
+            assert!(matches!(freq_multiplier(510, 1000, 1, None), Ok(_n)));
+            assert!(matches!(freq_multiplier(999, 1000, 1, None), Ok(_n)));
 
-        // ratio=0.75
-        let _n = (1u64 << 62) & (1u64 << 61);
-        assert!(matches!(freq_multiplier(750, 1000, 63, None), Ok(_n)));
+            /*
+             * Intel: 16.48 format
+             * representable ratios:
+             * - int: [0, 65535]
+             * - frac: 48-binary digits of precision
+             */
 
-        // ratio=1.0
-        let _n = 1u64 << 63;
-        assert!(matches!(freq_multiplier(1000, 1000, 63, None), Ok(_n)));
+            // int lower bound: 1
+            let _n = 1u64 << FRAC_SIZE_INTEL;
+            assert!(matches!(
+                freq_multiplier(u64::MAX, u64::MAX, FRAC_SIZE_INTEL, INT_SIZE_INTEL),
+                Ok(_n)
+            ));
 
-        // ratio=1.75
-        let _n = (1u64 << 63) & (1u64 << 62) & (1u64 << 61);
-        assert!(matches!(freq_multiplier(1750, 1000, 63, None), Ok(_n)));
+            // int upper bound: 65535
+            let _n = 65535u64 << FRAC_SIZE_INTEL;
+            assert!(matches!(
+                freq_multiplier(65535000, 1000, FRAC_SIZE_INTEL, INT_SIZE_INTEL),
+                Ok(_n)
+            ));
 
-        // OOB: ratio=2.0
-        assert!(matches!(freq_multiplier(2000, 1000, 63, None), Err(_)));
-
-        /*
-         * 63.1 format
-         * representable ratios:
-         * - int: [0, 2^64 - 1]
-         * - frac: 1 digit of precision (0.5)
-         */
-
-        // frac max precision: 0.5
-        // < 0.5 => 0.0
-        assert!(matches!(freq_multiplier(1, 1000, 1, None), Ok(0)));
-        assert!(matches!(freq_multiplier(499, 1000, 1, None), Ok(0)));
-        let _n = 2 ^ 63 & 0b1;
-        // = 0.5
-        assert!(matches!(freq_multiplier(500, 1000, 1, None), Ok(_n)));
-        // > 0.5 => 0.5
-        assert!(matches!(freq_multiplier(510, 1000, 1, None), Ok(_n)));
-        assert!(matches!(freq_multiplier(999, 1000, 1, None), Ok(_n)));
-
-        /*
-         * Intel: 16.48 format
-         * representable ratios:
-         * - int: [0, 65535]
-         * - frac: 48-binary digits of precision
-         */
-
-        // int lower bound: 1
-        let _n = 1u64 << FRAC_SIZE_INTEL;
-        assert!(matches!(
-            freq_multiplier(u64::MAX, u64::MAX, FRAC_SIZE_INTEL, INT_SIZE_INTEL),
-            Ok(_n)
-        ));
-
-        // int upper bound: 65535
-        let _n = 65535u64 << FRAC_SIZE_INTEL;
-        assert!(matches!(
-            freq_multiplier(65535000, 1000, FRAC_SIZE_INTEL, INT_SIZE_INTEL),
-            Ok(_n)
-        ));
-
-        /*
-         * AMD: 8.32 format
-         */
-    }*/
-*/
+            /*
+             * AMD: 8.32 format
+             */
+        }*/
+    */
 
     /*
     #[test]
@@ -680,4 +676,3 @@ mod tests {
     }
     */
 }
-*/

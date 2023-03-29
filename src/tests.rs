@@ -1,7 +1,7 @@
 pub struct FrTest {
     pub g: u64,
     pub h: u64,
-    pub f: u8,
+    pub f: u32,
     pub val: u64,
 }
 

@@ -64,10 +64,6 @@ enum Command {
         #[clap(long, arg_enum, default_value = "amd")]
         arch: Arch,
 
-        /// Calculate related values in assembly, rust, or both
-        #[clap(short = 'm', arg_enum, default_value = "rust")]
-        math_impl: MathImpl,
-
         /// Print TSC values as hexadecimal
         #[clap(long, takes_value = false)]
         hex: bool,
@@ -228,7 +224,6 @@ fn cmd_simulate(
     guest_hz: u64,
     hosts: Vec<HostDef>,
     arch: Arch,
-    _math_impl: MathImpl,
     print_hex: bool,
 ) {
     assert!(hosts.len() > 0);
@@ -362,7 +357,7 @@ pub fn cmd_offset(
     initial_guest_tsc: u64,
     guest_hz: u64,
     host_hz: u64,
-    _math_impl: MathImpl,
+    math_impl: MathImpl,
     frac_size: u32,
     int_size: u32,
 ) {
@@ -379,9 +374,10 @@ pub fn cmd_offset(
         initial_guest_tsc
     );
     println!("\t\tfrequency: {guest_hz} Hz");
+    println!("\tImplementation: {:?}", math_impl);
     println!("");
 
-    let res = tsc_offset(
+    let rs_res = tsc_offset(
         initial_host_tsc,
         initial_guest_tsc,
         guest_hz,
@@ -389,13 +385,36 @@ pub fn cmd_offset(
         frac_size,
         int_size,
     );
+    let asm_res = asm_math::calc_tsc_offset(
+        initial_host_tsc,
+        initial_guest_tsc,
+        guest_hz,
+        host_hz,
+        frac_size,
+    );
 
-    match res {
-        Ok(offset) => {
-            println!("TSC offset: {} ({:#x})", offset, offset);
+    match math_impl {
+        MathImpl::Asm => {
+            println!("TSC offset: {} ({:#x})", asm_res, asm_res);
         }
-        Err(e) => {
-            eprintln!("could not calculate TSC offset: {}", e);
+        MathImpl::Rust => match rs_res {
+            Ok(offset) => {
+                println!("TSC offset: {} ({:#x})", offset, offset);
+            }
+            Err(e) => {
+                eprintln!("could not calculate TSC offset: {}", e);
+            }
+        },
+        MathImpl::All => {
+            println!("TSC offset (asm):  {} ({:#x})", asm_res, asm_res);
+            match rs_res {
+                Ok(offset) => {
+                    println!("TSC offset (rust): {} ({:#x})", offset, offset);
+                }
+                Err(e) => {
+                    eprintln!("could not calculate TSC offset (rust): {}", e);
+                }
+            }
         }
     }
 }
@@ -403,7 +422,7 @@ pub fn cmd_offset(
 fn cmd_freq_multiplier(
     guest_hz: u64,
     host_hz: u64,
-    _math_impl: MathImpl,
+    math_impl: MathImpl,
     int_size: u32,
     frac_size: u32,
 ) {
@@ -413,17 +432,42 @@ fn cmd_freq_multiplier(
     println!("\tGuest:");
     println!("\t\tfrequency: {guest_hz} Hz");
     println!("");
-    println!("\tMultiplier format: {}.{}", int_size, frac_size);
+    println!("\tMultiplier format:\t{}.{}", int_size, frac_size);
+    println!("\tImplementation:\t{:?}", math_impl);
     println!("");
 
-    let res = freq_multiplier(guest_hz, host_hz, frac_size, int_size);
+    let rs_res = freq_multiplier(guest_hz, host_hz, frac_size, int_size);
+    let asm_res =
+        unsafe { asm_math::calc_freq_multiplier(guest_hz, host_hz, frac_size) };
 
-    match res {
-        Ok(m) => {
-            println!("Frequency multiplier: {} ({:#x})", m, m);
+    match math_impl {
+        MathImpl::Asm => {
+            println!("Frequency multiplier: {} ({:#x})", asm_res, asm_res);
         }
-        Err(e) => {
-            eprintln!("could not calculate frequency multiplier: {}", e);
+        MathImpl::Rust => match rs_res {
+            Ok(m) => {
+                println!("Frequency multiplier: {} ({:#x})", m, m);
+            }
+            Err(e) => {
+                eprintln!("could not calculate frequency multiplier: {}", e);
+            }
+        },
+        MathImpl::All => {
+            println!(
+                "Frequency multiplier (asm):  {} ({:#x})",
+                asm_res, asm_res
+            );
+            match rs_res {
+                Ok(m) => {
+                    println!("Frequency multiplier (rust): {} ({:#x})", m, m);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "could not calculate frequency multiplier (rust): {}",
+                        e
+                    );
+                }
+            }
         }
     }
 }
@@ -434,7 +478,7 @@ fn cmd_guest_tsc(
     host_tsc: u64,
     host_hz: u64,
     guest_hz: u64,
-    _math_impl: MathImpl,
+    math_impl: MathImpl,
     int_size: u32,
     frac_size: u32,
 ) {
@@ -452,9 +496,18 @@ fn cmd_guest_tsc(
         initial_guest_tsc
     );
     println!("\t\tfrequency: {guest_hz} Hz");
+    println!("\tImplementation: {:?}", math_impl);
     println!("");
 
-    let res = guest_tsc(
+    let asm_res = asm_math::calc_guest_tsc(
+        initial_host_tsc,
+        initial_guest_tsc,
+        host_hz,
+        guest_hz,
+        host_tsc,
+        frac_size,
+    );
+    let rs_res = guest_tsc(
         initial_host_tsc,
         initial_guest_tsc,
         host_hz,
@@ -464,12 +517,28 @@ fn cmd_guest_tsc(
         int_size,
     );
 
-    match res {
-        Ok(tsc) => {
-            println!("Guest TSC: {} ({:#x})", tsc, tsc);
+    match math_impl {
+        MathImpl::Asm => {
+            println!("Guest TSC: {} ({:#x})", asm_res, asm_res);
         }
-        Err(e) => {
-            eprintln!("could not calculate guest TSC: {}", e);
+        MathImpl::Rust => match rs_res {
+            Ok(tsc) => {
+                println!("Guest TSC: {} ({:#x})", tsc, tsc);
+            }
+            Err(e) => {
+                eprintln!("could not calculate guest TSC: {}", e);
+            }
+        },
+        MathImpl::All => {
+            println!("Guest TSC (asm):  {} ({:#x})", asm_res, asm_res);
+            match rs_res {
+                Ok(tsc) => {
+                    println!("Guest TSC (rust): {} ({:#x})", tsc, tsc);
+                }
+                Err(e) => {
+                    eprintln!("could not calculate guest TSC (rust): {}", e);
+                }
+            }
         }
     }
 }
@@ -582,13 +651,12 @@ fn main() {
             guest_hz,
             hosts,
             arch,
-            math_impl,
             hex,
         } => {
             let host_defs =
                 parse_hosts(initial_host_tsc, initial_host_hz, hosts, duration)
                     .unwrap();
-            cmd_simulate(duration, guest_hz, host_defs, arch, math_impl, hex);
+            cmd_simulate(duration, guest_hz, host_defs, arch, hex);
         }
     }
 }
