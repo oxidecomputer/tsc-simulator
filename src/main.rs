@@ -24,7 +24,7 @@ enum Arch {
 }
 
 #[derive(Debug, Copy, Clone, ArgEnum)]
-enum MathImpl {
+pub enum MathImpl {
     Asm,
     Rust,
     All,
@@ -91,7 +91,11 @@ enum CalcCommand {
         tsc: u64,
 
         /// Frequency (Hz)
-        #[clap(short = 'f', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(
+            short = 'f',
+            value_parser=maybe_hex::<u64>,
+            default_value = "1000000000")
+        ]
         freq_hz: u64,
     },
 
@@ -102,7 +106,11 @@ enum CalcCommand {
         hrtime: u64,
 
         /// Frequency (Hz)
-        #[clap(short = 'f', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(
+            short = 'f',
+            value_parser=maybe_hex::<u64>,
+            default_value = "1000000000")
+        ]
         freq_hz: u64,
     },
 
@@ -113,18 +121,30 @@ enum CalcCommand {
         initial_host_tsc: u64,
 
         /// Initial Guest TSC value
-        #[clap(short = 't', value_parser=maybe_hex::<u64>, default_value = "0")]
+        #[clap(
+            short = 't',
+            value_parser=maybe_hex::<u64>,
+            default_value = "0")
+        ]
         initial_guest_tsc: u64,
 
         /// Current Host TSC value
         host_tsc: u64,
 
         /// Host Frequency (Hz)
-        #[clap(short = 'f', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(
+            short = 'f',
+            value_parser=maybe_hex::<u64>,
+            default_value = "1000000000")
+        ]
         host_hz: u64,
 
         /// Guest Frequency (Hz)
-        #[clap(short = 'g', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(
+            short = 'g',
+            value_parser=maybe_hex::<u64>,
+            default_value = "1000000000")
+        ]
         guest_hz: u64,
 
         /// Calculate related values in assembly, rust, or both
@@ -133,9 +153,9 @@ enum CalcCommand {
 
         // AMD defaults
         #[clap(long, default_value = "8")]
-        int_size: u8,
+        int_size: u32,
         #[clap(long, default_value = "32")]
-        frac_size: u8,
+        frac_size: u32,
     },
 
     /// Compute a guest's TSC offset
@@ -145,15 +165,27 @@ enum CalcCommand {
         initial_host_tsc: u64,
 
         /// Initial Guest TSC value
-        #[clap(short = 't', value_parser=maybe_hex::<u64>, default_value = "0")]
+        #[clap(
+            short = 't',
+            value_parser=maybe_hex::<u64>,
+            default_value = "0")
+        ]
         initial_guest_tsc: u64,
 
         /// Guest Frequency (Hz)
-        #[clap(short = 'g', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(
+            short = 'g',
+            value_parser=maybe_hex::<u64>,
+            default_value = "1000000000")
+        ]
         guest_hz: u64,
 
         /// Host Frequency (Hz)
-        #[clap(short = 'f', value_parser=maybe_hex::<u64>, default_value = "1000000000")]
+        #[clap(
+            short = 'f',
+            value_parser=maybe_hex::<u64>,
+            default_value = "1000000000")
+        ]
         host_hz: u64,
 
         /// Calculate related values in assembly, rust, or both
@@ -162,9 +194,9 @@ enum CalcCommand {
 
         // AMD defaults
         #[clap(long, default_value = "8")]
-        int_size: u8,
+        int_size: u32,
         #[clap(long, default_value = "32")]
-        frac_size: u8,
+        frac_size: u32,
     },
 
     /// Compute the frequency multiplier for a guest and a host
@@ -179,11 +211,11 @@ enum CalcCommand {
 
         /// Number of int bits in multiplier
         #[clap(long, default_value = "8")]
-        int_size: u8,
+        int_size: u32,
 
         /// Number of frac bits in multiplier
         #[clap(long, default_value = "32")]
-        frac_size: u8,
+        frac_size: u32,
 
         /// Calculate related values in assembly, rust, or both
         #[clap(short = 'm', arg_enum, default_value = "rust")]
@@ -196,7 +228,7 @@ fn cmd_simulate(
     guest_hz: u64,
     hosts: Vec<HostDef>,
     arch: Arch,
-    math_impl: MathImpl,
+    _math_impl: MathImpl,
     print_hex: bool,
 ) {
     assert!(hosts.len() > 0);
@@ -268,12 +300,294 @@ fn cmd_simulate(
 
             // print the host and guest TSC values
             if print_hex {
-                println!("{:<10} {:#16x} {:#16x}", t, cur_guest_tsc, cur_host_tsc,);
+                println!(
+                    "{:<10} {:#16x} {:#16x}",
+                    t, cur_guest_tsc, cur_host_tsc,
+                );
             } else {
-                println!("{:<10} {:#16} {:#16}", t, cur_guest_tsc, cur_host_tsc,);
+                println!(
+                    "{:<10} {:#16} {:#16}",
+                    t, cur_guest_tsc, cur_host_tsc,
+                );
             }
 
             cur_host_tsc = tsc_incr(cur_host_tsc, host_hz);
+        }
+
+        start_guest_tsc = cur_guest_tsc;
+    }
+}
+
+fn parse_hosts(
+    initial_host_tsc: u64,
+    initial_host_hz: u64,
+    input_hosts: Vec<String>,
+    duration: usize,
+) -> anyhow::Result<Vec<HostDef>> {
+    let mut res: Vec<HostDef> = Vec::new();
+    res.push(HostDef {
+        start: 0,
+        host_tsc: initial_host_tsc,
+        host_freq: initial_host_hz,
+    });
+
+    for s in input_hosts.iter() {
+        let mut split = s.split(" ");
+
+        let start: usize = split.next().unwrap().parse()?;
+        let host_tsc: u64 = split.next().unwrap().parse()?;
+        let host_freq: u64 = split.next().unwrap().parse()?;
+
+        if start > duration {
+            return Err(anyhow!("cannot migrate past duration"));
+        }
+
+        res.push(HostDef {
+            start,
+            host_tsc,
+            host_freq,
+        });
+    }
+
+    // sort by time order
+    res.sort_by(|a, b| a.start.cmp(&b.start));
+
+    // TODO: check for duplicates
+
+    Ok(res)
+}
+
+pub fn cmd_offset(
+    initial_host_tsc: u64,
+    initial_guest_tsc: u64,
+    guest_hz: u64,
+    host_hz: u64,
+    _math_impl: MathImpl,
+    frac_size: u32,
+    int_size: u32,
+) {
+    println!("calculating TSC offset for parameters:");
+    println!("\tHost:");
+    println!(
+        "\t\tinitial TSC: {initial_host_tsc} ({:#x})",
+        initial_host_tsc
+    );
+    println!("\t\tfrequency: {host_hz} Hz");
+    println!("\tGuest:");
+    println!(
+        "\t\tinitial TSC: {initial_guest_tsc} ({:#x})",
+        initial_guest_tsc
+    );
+    println!("\t\tfrequency: {guest_hz} Hz");
+    println!("");
+
+    let res = tsc_offset(
+        initial_host_tsc,
+        initial_guest_tsc,
+        guest_hz,
+        host_hz,
+        frac_size,
+        int_size,
+    );
+
+    match res {
+        Ok(offset) => {
+            println!("TSC offset: {} ({:#x})", offset, offset);
+        }
+        Err(e) => {
+            eprintln!("could not calculate TSC offset: {}", e);
+        }
+    }
+}
+
+fn cmd_freq_multiplier(
+    guest_hz: u64,
+    host_hz: u64,
+    _math_impl: MathImpl,
+    int_size: u32,
+    frac_size: u32,
+) {
+    println!("calculating frequency multiplier for parameters:");
+    println!("\tHost:");
+    println!("\t\tfrequency: {host_hz} Hz");
+    println!("\tGuest:");
+    println!("\t\tfrequency: {guest_hz} Hz");
+    println!("");
+    println!("\tMultiplier format: {}.{}", int_size, frac_size);
+    println!("");
+
+    let res = freq_multiplier(guest_hz, host_hz, frac_size, int_size);
+
+    match res {
+        Ok(m) => {
+            println!("Frequency multiplier: {} ({:#x})", m, m);
+        }
+        Err(e) => {
+            eprintln!("could not calculate frequency multiplier: {}", e);
+        }
+    }
+}
+
+fn cmd_guest_tsc(
+    initial_host_tsc: u64,
+    initial_guest_tsc: u64,
+    host_tsc: u64,
+    host_hz: u64,
+    guest_hz: u64,
+    _math_impl: MathImpl,
+    int_size: u32,
+    frac_size: u32,
+) {
+    println!("calculating guest TSC for parameters:");
+    println!("\tHost:");
+    println!(
+        "\t\tinitial TSC: {initial_host_tsc} ({:#x})",
+        initial_host_tsc
+    );
+    println!("\t\tcurrent TSC: {host_tsc} ({:#x})", host_tsc);
+    println!("\t\tfrequency: {host_hz} Hz");
+    println!("\tGuest:");
+    println!(
+        "\t\tinitial TSC: {initial_guest_tsc} ({:#x})",
+        initial_guest_tsc
+    );
+    println!("\t\tfrequency: {guest_hz} Hz");
+    println!("");
+
+    let res = guest_tsc(
+        initial_host_tsc,
+        initial_guest_tsc,
+        host_hz,
+        guest_hz,
+        host_tsc,
+        frac_size,
+        int_size,
+    );
+
+    match res {
+        Ok(tsc) => {
+            println!("Guest TSC: {} ({:#x})", tsc, tsc);
+        }
+        Err(e) => {
+            eprintln!("could not calculate guest TSC: {}", e);
+        }
+    }
+}
+
+fn cmd_hrtime(tsc: u64, freq_hz: u64) {
+    println!("calculating hrtime for parameters:");
+    println!("\ttsc: {tsc} ({:#x})", tsc);
+    println!("\tfrequency: {freq_hz} Hz ({:#x} Hz)", freq_hz);
+    println!("");
+
+    let res = hrtime(tsc, freq_hz);
+
+    match res {
+        Ok(hrtime) => {
+            println!("hrtime: {hrtime} ({:#x})", hrtime);
+        }
+        Err(e) => {
+            eprintln!("could not calculate hrtime: {}", e);
+        }
+    }
+}
+
+fn cmd_tsc(hrtime: u64, freq_hz: u64) {
+    println!("calculating TSC for parameters:");
+    println!("\thrtime: {hrtime} ({:#x})", hrtime);
+    println!("\tfrequency: {freq_hz} Hz ({:#x} Hz)", freq_hz);
+    println!("");
+
+    let res = tsc(hrtime, freq_hz);
+
+    match res {
+        Ok(tsc) => {
+            println!("TSC: {tsc} ({:#x})", tsc);
+        }
+        Err(e) => {
+            eprintln!("could not calculate TSC: {}", e);
+        }
+    }
+}
+
+fn main() {
+    println!("");
+
+    let opt = Opt::parse();
+
+    match opt.cmd {
+        Command::Calc { cmd } => match cmd {
+            CalcCommand::Hrtime { tsc, freq_hz } => {
+                cmd_hrtime(tsc, freq_hz);
+            }
+            CalcCommand::Tsc { hrtime, freq_hz } => {
+                cmd_tsc(hrtime, freq_hz);
+            }
+            CalcCommand::GuestTsc {
+                initial_host_tsc,
+                initial_guest_tsc,
+                host_tsc,
+                host_hz,
+                guest_hz,
+                math_impl,
+                int_size,
+                frac_size,
+            } => {
+                cmd_guest_tsc(
+                    initial_host_tsc,
+                    initial_guest_tsc,
+                    host_tsc,
+                    host_hz,
+                    guest_hz,
+                    math_impl,
+                    int_size,
+                    frac_size,
+                );
+            }
+            CalcCommand::Offset {
+                initial_host_tsc,
+                initial_guest_tsc,
+                guest_hz,
+                host_hz,
+                math_impl,
+                int_size,
+                frac_size,
+            } => {
+                cmd_offset(
+                    initial_host_tsc,
+                    initial_guest_tsc,
+                    guest_hz,
+                    host_hz,
+                    math_impl,
+                    frac_size,
+                    int_size,
+                );
+            }
+            CalcCommand::Freq {
+                host_hz,
+                guest_hz,
+                math_impl,
+                int_size,
+                frac_size,
+            } => {
+                cmd_freq_multiplier(
+                    guest_hz, host_hz, math_impl, int_size, frac_size,
+                );
+            }
+        },
+        Command::Simulate {
+            duration,
+            initial_host_tsc,
+            initial_host_hz,
+            guest_hz,
+            hosts,
+            arch,
+            math_impl,
+            hex,
+        } => {
+            let host_defs =
+                parse_hosts(initial_host_tsc, initial_host_hz, hosts, duration)
+                    .unwrap();
             cmd_simulate(duration, guest_hz, host_defs, arch, math_impl, hex);
         }
     }

@@ -11,7 +11,7 @@
  *
  * %rdi: uint64_t guest_hz
  * %rsi: uint64_t host_hz
- * %rdx: uint8_t frac_size
+ * %rdx: uint32_t frac_size
  */
 calc_freq_multiplier:
 	/*
@@ -43,7 +43,7 @@ calc_freq_multiplier:
  *
  * %rdi: uint64_t tsc
  * %rsi: uint64_t multiplier
- * %rdx: uint8_t  frac_size
+ * %rdx: uint32_t  frac_size
  *
  */
 scale_tsc:

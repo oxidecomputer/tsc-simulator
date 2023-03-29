@@ -1,18 +1,15 @@
 use anyhow::{anyhow, Result};
 
-pub const INT_SIZE_INTEL: u8 = 16;
-pub const FRAC_SIZE_INTEL: u8 = 48;
+pub const INT_SIZE_INTEL: u32 = 16;
+pub const FRAC_SIZE_INTEL: u32 = 48;
 
-pub const INT_SIZE_AMD: u8 = 8;
-pub const FRAC_SIZE_AMD: u8 = 32;
+pub const INT_SIZE_AMD: u32 = 8;
+pub const FRAC_SIZE_AMD: u32 = 32;
 
 pub const NS_PER_SEC: u32 = 1000000000;
 
-pub const MIN_RATIO: u8 = 1;
-pub const MAX_RATIO: u8 = 15;
-
 // Returns true if `val` will overflow `int_size + frac_size` bits
-fn fixed_point_overflow(val: u128, int_size: u8, frac_size: u8) -> bool {
+fn fixed_point_overflow(val: u128, int_size: u32, frac_size: u32) -> bool {
     let n_unused_bits = 64 + (64 - int_size - frac_size);
     let mask = !(u128::MAX >> n_unused_bits);
 
@@ -29,12 +26,18 @@ fn overflow_64(val: u128) -> bool {
 /// Given as input guest and host frequencies in Hz, outputs a fixed point
 /// number representing the ratio of guest/host, with the binary point at the
 /// last `frac_size` bits.
-pub fn freq_multiplier(guest_hz: u64, host_hz: u64, frac_size: u8, int_size: u8) -> Result<u64> {
+pub fn freq_multiplier(
+    guest_hz: u64,
+    host_hz: u64,
+    frac_size: u32,
+    int_size: u32,
+) -> Result<u64> {
     assert_ne!(guest_hz, 0);
     assert_ne!(host_hz, 0);
 
     let scaling_factor: u64 = 1 << frac_size;
-    let multiplier = (scaling_factor as u128 * guest_hz as u128) / host_hz as u128;
+    let multiplier =
+        (scaling_factor as u128 * guest_hz as u128) / host_hz as u128;
 
     if fixed_point_overflow(multiplier, int_size, frac_size) {
         return Err(anyhow!(
@@ -62,10 +65,11 @@ fn calc_tsc_offset(
     initial_host_tsc: u64,
     initial_guest_tsc: u64,
     multiplier: u64,
-    frac_size: u8,
-    int_size: u8,
+    frac_size: u32,
+    int_size: u32,
 ) -> Result<i64> {
-    let host_tsc_scaled: u128 = (initial_host_tsc as u128 * multiplier as u128) >> frac_size;
+    let host_tsc_scaled: u128 =
+        (initial_host_tsc as u128 * multiplier as u128) >> frac_size;
 
     if overflow_64(host_tsc_scaled) {
         return Err(anyhow!(
@@ -111,8 +115,8 @@ pub fn tsc_offset(
     initial_guest_tsc: u64,
     guest_hz: u64,
     host_hz: u64,
-    frac_size: u8,
-    int_size: u8,
+    frac_size: u32,
+    int_size: u32,
 ) -> Result<i64> {
     let multiplier = freq_multiplier(guest_hz, host_hz, frac_size, int_size)?;
     calc_tsc_offset(
@@ -141,10 +145,11 @@ pub fn guest_tsc(
     host_hz: u64,
     guest_hz: u64,
     cur_host_tsc: u64,
-    frac_size: u8,
-    int_size: u8,
+    frac_size: u32,
+    int_size: u32,
 ) -> Result<u64> {
-    let freq_multiplier = freq_multiplier(guest_hz, host_hz, frac_size, int_size)?;
+    let freq_multiplier =
+        freq_multiplier(guest_hz, host_hz, frac_size, int_size)?;
     let tsc_offset = calc_tsc_offset(
         initial_host_tsc,
         initial_guest_tsc,
@@ -153,7 +158,8 @@ pub fn guest_tsc(
         int_size,
     )?;
 
-    let host_tsc_scaled: u128 = (cur_host_tsc as u128 * freq_multiplier as u128) >> frac_size;
+    let host_tsc_scaled: u128 =
+        (cur_host_tsc as u128 * freq_multiplier as u128) >> frac_size;
     if overflow_64(host_tsc_scaled) {
         return Err(anyhow!(
             "cannot scale host TSC: host_tsc={} ({:#x}), freq_multiplier={} ({:#x}), {}.{} format",
@@ -197,6 +203,9 @@ pub fn tsc(hrtime: u64, freq_hz: u64) -> Result<u64> {
 
 /*
 mod tests {
+    const MIN_RATIO: u8 = 1;
+    const MAX_RATIO: u8 = 15;
+
     use crate::math::*;
     use crate::tests::freq_ratio_tests;
     use quickcheck::TestResult;
@@ -206,7 +215,7 @@ mod tests {
     // - guest/host frequencies are > 0
     // - int_size/frac_size are nonzero and fit into 64 bits
     #[quickcheck]
-    fn freq_multiplier_panic_check(gf: u64, hf: u64, frac: u8, int: u8) -> TestResult {
+    fn freq_multiplier_panic_check(gf: u64, hf: u64, frac: u32, int: u32) -> TestResult {
         if gf == 0
             || hf == 0
             || frac == 0
@@ -233,8 +242,8 @@ mod tests {
         igtsc: u64,
         gf: u64,
         hf: u64,
-        frac: u8,
-        int: u8,
+        frac: u32,
+        int: u32,
     ) -> TestResult {
         if gf == 0
             || hf == 0
@@ -258,8 +267,8 @@ mod tests {
     fn calc_tsc_offset_max_ratio(
         ihtsc: u64,
         igtsc: u64,
-        int: u8,
-        frac: u8,
+        int: u32,
+        frac: u32,
         ratio: u8,
     ) -> TestResult {
         if !((int == INT_SIZE_AMD && frac == FRAC_SIZE_AMD)
@@ -312,8 +321,8 @@ mod tests {
         gf: u64,
         hf: u64,
         chtsc: u64,
-        frac: u8,
-        int: u8,
+        frac: u32,
+        int: u32,
     ) -> TestResult {
         if gf == 0 || hf == 0 || frac == 0 || frac >= 64 {
             return TestResult::discard();
@@ -348,8 +357,8 @@ mod tests {
         migrate_htsc: u64,
         migrate_hfreq: u64,
 
-        frac: u8,
-        int: u8,
+        frac: u32,
+        int: u32,
     ) -> TestResult {
         if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64 {
             return TestResult::discard();
@@ -412,8 +421,8 @@ mod tests {
         migrate_htsc: u64,
         migrate_hfreq: u64,
 
-        frac: u8,
-        int: u8,
+        frac: u32,
+        int: u32,
     ) -> TestResult {
         if frac == 0 || int == 0 || frac >= 64 || int >= 64 || (frac + int) > 64 {
             return TestResult::discard();
