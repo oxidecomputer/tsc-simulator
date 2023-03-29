@@ -1,15 +1,12 @@
 use anyhow::{anyhow, Result};
 
-pub const INT_SIZE_INTEL: u32 = 16;
-pub const FRAC_SIZE_INTEL: u32 = 48;
-
-pub const INT_SIZE_AMD: u32 = 8;
-pub const FRAC_SIZE_AMD: u32 = 32;
+use crate::{FRAC_SIZE_AMD, FRAC_SIZE_INTEL, INT_SIZE_AMD, INT_SIZE_INTEL};
 
 pub const NS_PER_SEC: u32 = 1000000000;
 
 // Returns true if `val` will overflow `int_size + frac_size` bits
 fn fixed_point_overflow(val: u128, int_size: u32, frac_size: u32) -> bool {
+    assert!(int_size + frac_size <= 64);
     let n_unused_bits = 64 + (64 - int_size - frac_size);
     let mask = !(u128::MAX >> n_unused_bits);
 
@@ -21,6 +18,22 @@ fn overflow_64(val: u128) -> bool {
     let mask = u128::MAX << 64;
 
     (val & mask) != 0
+}
+
+pub fn scale_tsc(tsc: u64, multiplier: u64, frac_size: u32) -> Result<u64> {
+    let scaled: u128 = (tsc as u128 * multiplier as u128) >> frac_size;
+
+    if overflow_64(scaled) {
+        return Err(anyhow!(
+            "cannot scale host TSC: host_tsc={}, multiplier={} ({:#x}), frac_size={}",
+            tsc,
+            multiplier,
+            multiplier,
+            frac_size
+        ));
+    }
+
+    Ok(scaled as u64)
 }
 
 /// Given as input guest and host frequencies in Hz, outputs a fixed point
@@ -68,19 +81,7 @@ fn calc_tsc_offset(
     frac_size: u32,
     int_size: u32,
 ) -> Result<i64> {
-    let host_tsc_scaled: u128 =
-        (initial_host_tsc as u128 * multiplier as u128) >> frac_size;
-
-    if overflow_64(host_tsc_scaled) {
-        return Err(anyhow!(
-            "cannot scale host TSC: host_tsc={}, multiplier={} ({:#x}), {}.{} format",
-            initial_host_tsc,
-            multiplier,
-            multiplier,
-            int_size,
-            frac_size
-        ));
-    }
+    let host_tsc_scaled = scale_tsc(initial_host_tsc, multiplier, frac_size)?;
 
     let (diff, negate) = if host_tsc_scaled as u64 >= initial_guest_tsc {
         ((host_tsc_scaled as u64 - initial_guest_tsc), true)
@@ -158,19 +159,7 @@ pub fn guest_tsc(
         int_size,
     )?;
 
-    let host_tsc_scaled: u128 =
-        (cur_host_tsc as u128 * freq_multiplier as u128) >> frac_size;
-    if overflow_64(host_tsc_scaled) {
-        return Err(anyhow!(
-            "cannot scale host TSC: host_tsc={} ({:#x}), freq_multiplier={} ({:#x}), {}.{} format",
-            cur_host_tsc,
-            cur_host_tsc,
-            freq_multiplier,
-            freq_multiplier,
-            int_size,
-            frac_size
-        ));
-    }
+    let host_tsc_scaled = scale_tsc(cur_host_tsc, freq_multiplier, frac_size)?;
 
     let guest_tsc: i128 = host_tsc_scaled as i128 + tsc_offset as i128;
     if overflow_64(guest_tsc as u128) {

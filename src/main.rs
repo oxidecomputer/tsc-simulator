@@ -10,6 +10,11 @@ mod asm_math;
 mod math;
 mod tests;
 
+pub const INT_SIZE_INTEL: u32 = 16;
+pub const FRAC_SIZE_INTEL: u32 = 48;
+pub const INT_SIZE_AMD: u32 = 8;
+pub const FRAC_SIZE_AMD: u32 = 32;
+
 /// TSC Simulator
 #[derive(Debug, Parser)]
 struct Opt {

@@ -18,9 +18,8 @@ calc_freq_multiplier:
 	 * Create scaling factor: 1 << frac_size
 	 * Store result in %rax
 	 */
-	xor %rax, %rax
 	movq $1, %rax
-	mov %dl, %cl
+	mov %rdx, %rcx
 	shlq %cl, %rax
 
 	/*
@@ -48,8 +47,7 @@ calc_freq_multiplier:
  */
 scale_tsc:
 	/* Save `frac_size` in %cl */
-	xor %rcx, %rcx
-	mov %dl, %cl
+	mov %edx, %ecx
 
 	/*
 	 * Multiply tsc (%rdi) * multiplier (%rax)
@@ -57,7 +55,6 @@ scale_tsc:
 	 */
 	movq %rdi, %rax
 	mulq %rsi
-
 
 	/*
 	 * Shift the 128-bit product right `frac_size` bits:
@@ -70,10 +67,8 @@ scale_tsc:
 	shrq %cl, %rax
 
 	/* Compute 64 - FRAC_SIZE and store result in %cl */
-	xor %r9, %r9
 	movq %rcx, %r9
-	xor %rcx, %rcx
-	mov $64, %cl
+	movq $64, %rcx
 	subq %r9, %rcx
 
 	/* Shift upper 64 bits right `frac_size` */
