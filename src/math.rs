@@ -1,7 +1,5 @@
 use anyhow::{anyhow, Result};
 
-use crate::{FRAC_SIZE_AMD, FRAC_SIZE_INTEL, INT_SIZE_AMD, INT_SIZE_INTEL};
-
 pub const NS_PER_SEC: u32 = 1000000000;
 
 // Returns true if `val` will overflow `int_size + frac_size` bits
@@ -79,7 +77,6 @@ fn calc_tsc_offset(
     initial_guest_tsc: u64,
     multiplier: u64,
     frac_size: u32,
-    int_size: u32,
 ) -> Result<i64> {
     let host_tsc_scaled = scale_tsc(initial_host_tsc, multiplier, frac_size)?;
 
@@ -120,13 +117,7 @@ pub fn tsc_offset(
     int_size: u32,
 ) -> Result<i64> {
     let multiplier = freq_multiplier(guest_hz, host_hz, frac_size, int_size)?;
-    calc_tsc_offset(
-        initial_host_tsc,
-        initial_guest_tsc,
-        multiplier,
-        frac_size,
-        int_size,
-    )
+    calc_tsc_offset(initial_host_tsc, initial_guest_tsc, multiplier, frac_size)
 }
 
 /// Compute the guest TSC at a point in time for a guest, with inputs:
@@ -156,7 +147,6 @@ pub fn guest_tsc(
         initial_guest_tsc,
         freq_multiplier,
         frac_size,
-        int_size,
     )?;
 
     let host_tsc_scaled = scale_tsc(cur_host_tsc, freq_multiplier, frac_size)?;
@@ -191,9 +181,6 @@ pub fn tsc(hrtime: u64, freq_hz: u64) -> Result<u64> {
 }
 
 mod tests {
-    const MIN_RATIO: u8 = 1;
-    const MAX_RATIO: u8 = 15;
-
     use crate::math::*;
     //use crate::tests::freq_ratio_tests;
     use quickcheck::TestResult;
@@ -264,6 +251,9 @@ mod tests {
         frac: u32,
         ratio: u8,
     ) -> TestResult {
+        const MIN_RATIO: u8 = 1;
+        const MAX_RATIO: u8 = 15;
+
         if !((int == INT_SIZE_AMD && frac == FRAC_SIZE_AMD)
             || (int == INT_SIZE_INTEL && frac == FRAC_SIZE_AMD))
         {
@@ -398,7 +388,7 @@ mod tests {
     // following a migration
     // TODO: any ratio not an even power of 2 is going to lose some precision
     //#[quickcheck]
-    fn guest_tsc_drift(
+    fn _guest_tsc_drift(
         // boot host (initial guest TSC: 0)
         boot_htsc: u64,
         cur_htsc: u64,

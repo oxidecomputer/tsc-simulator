@@ -1,14 +1,17 @@
-use crate::{FRAC_SIZE_AMD, FRAC_SIZE_INTEL, INT_SIZE_AMD, INT_SIZE_INTEL};
+#[cfg(test)]
+mod tests {
 
-pub(crate) struct Frt {
-    pub g: u64,
-    pub h: u64,
-    pub f: u32,
-    pub v: u64,
-}
+    use super::{FRAC_SIZE_AMD, FRAC_SIZE_INTEL};
 
-#[rustfmt::skip]
-pub(crate) const FREQ_RATIO_TESTS_VALID: &'static [Frt] = &[
+    struct Frt {
+        pub g: u64,
+        pub h: u64,
+        pub f: u32,
+        pub v: u64,
+    }
+
+    #[rustfmt::skip]
+const FREQ_RATIO_TESTS_VALID: &'static [Frt] = &[
 
     // Smaller frequencies (~KHz)
 
@@ -58,14 +61,14 @@ pub(crate) const FREQ_RATIO_TESTS_VALID: &'static [Frt] = &[
     Frt { g: 3000000000, h: 2000000000, f: 63,               v: 1 << 63 | 1 << 62 },
 ];
 
-pub(crate) struct Frti {
-    pub g: u64,
-    pub h: u64,
-    pub f: u32,
-}
+    struct Frti {
+        pub g: u64,
+        pub h: u64,
+        pub f: u32,
+    }
 
-#[rustfmt::skip]
-pub(crate) const FREQ_RATIO_TESTS_INVALID: &'static [Frti] = &[
+    #[rustfmt::skip]
+const FREQ_RATIO_TESTS_INVALID: &'static [Frti] = &[
     // values that overflow the int portion, generating an error for rust and a
     // #DE for the assembly version
 
@@ -80,15 +83,15 @@ pub(crate) const FREQ_RATIO_TESTS_INVALID: &'static [Frti] = &[
     Frti { g: 65536, h: 1, f: FRAC_SIZE_INTEL, },
 ];
 
-pub(crate) struct Stt {
-    pub t: u64,
-    pub m: u64,
-    pub f: u32,
-    pub v: u64,
-}
+    struct Stt {
+        pub t: u64,
+        pub m: u64,
+        pub f: u32,
+        pub v: u64,
+    }
 
-#[rustfmt::skip]
-pub(crate) const SCALE_TSC_TESTS_VALID: &'static [Stt] = &[
+    #[rustfmt::skip]
+const SCALE_TSC_TESTS_VALID: &'static [Stt] = &[
     // Ratio = 1.0
     Stt { t: 1, m: 1 << 1, f: 1, v: 1 },
     Stt { t: 1000000000, m: 1 << FRAC_SIZE_AMD,     f: FRAC_SIZE_AMD,   v: 1000000000, },
@@ -116,22 +119,20 @@ pub(crate) const SCALE_TSC_TESTS_VALID: &'static [Stt] = &[
     Stt { t: u64::MAX, m: 1 << 48, f: FRAC_SIZE_INTEL, v: u64::MAX, },
 ];
 
-pub(crate) struct Stti {
-    pub t: u64,
-    pub m: u64,
-    pub f: u32,
-}
+    struct Stti {
+        pub t: u64,
+        pub m: u64,
+        pub f: u32,
+    }
 
-#[rustfmt::skip]
-pub(crate) const SCALE_TSC_TESTS_INVALID: &'static [Stti] = &[
+    #[rustfmt::skip]
+const SCALE_TSC_TESTS_INVALID: &'static [Stti] = &[
     // values that overflow: (tsc * multiplier) >> frac
     Stti { t: u64::MAX, m: 1 << 1 | 1 << 0, f: 1 },
     Stti { t: u64::MAX, m: 1 << 32 | 1 << 31, f: FRAC_SIZE_AMD },
     Stti { t: u64::MAX, m: 1 << 48 | 1 << 47, f: FRAC_SIZE_INTEL },
 ];
 
-#[cfg(test)]
-mod tests {
     use super::{
         FREQ_RATIO_TESTS_INVALID, FREQ_RATIO_TESTS_VALID,
         SCALE_TSC_TESTS_INVALID, SCALE_TSC_TESTS_VALID,
